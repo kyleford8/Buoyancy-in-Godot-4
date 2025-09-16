@@ -23,6 +23,15 @@ uniform float time_scale : hint_range(0.0, 0.2, 0.005) = 0.025;
 uniform float wave_speed = 2.0;
 uniform float noise_scale = 10.0;
 uniform float height_scale = 0.15;
+
+// Surfable wave parameters
+uniform float wave_amplitude : hint_range(0.0, 5.0, 0.1) = 2.0;
+uniform float wave_frequency : hint_range(0.1, 2.0, 0.1) = 0.5;
+uniform float wave_length : hint_range(10.0, 100.0, 1.0) = 50.0;
+uniform float wave_steepness : hint_range(0.0, 1.0, 0.01) = 0.3;
+uniform vec2 primary_wave_dir = vec2(1.0, 0.0);
+uniform vec2 secondary_wave_dir = vec2(0.5, 0.8);
+uniform float wave_phase = 0.0;
 uniform float beers_law = 2.0;
 uniform float depth_offset = -0.75;
 
@@ -43,10 +52,43 @@ float edge(float depth) {
 	return near * far / (far + depth * (near - far));
 }
 
+// Gerstner wave function for surfable waves
+vec3 gerstner_wave(vec2 pos, float amplitude, float frequency, float phase, vec2 direction) {
+	float w = 2.0 * 3.14159 / wave_length;
+	float q = wave_steepness / (w * amplitude);
+	
+	float angle = w * dot(direction, pos) + phase;
+	float cos_angle = cos(angle);
+	float sin_angle = sin(angle);
+	
+	return vec3(
+		q * amplitude * direction.x * cos_angle,
+		amplitude * sin_angle,
+		q * amplitude * direction.y * cos_angle
+	);
+}
+
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	height = texture(wave, world_pos.xz / noise_scale + wave_time * wave_speed).r;
-	VERTEX.y += height * height_scale;
+	
+	// Combine multiple waves for realistic surfable waves
+	vec3 wave_offset = vec3(0.0);
+	
+	// Primary wave - use TIME for animation
+	float primary_phase = TIME * wave_frequency + wave_phase;
+	wave_offset += gerstner_wave(world_pos.xz, wave_amplitude, wave_frequency, primary_phase, primary_wave_dir);
+	
+	// Secondary wave
+	float secondary_phase = TIME * wave_frequency * 0.7 + wave_phase * 1.3;
+	wave_offset += gerstner_wave(world_pos.xz, wave_amplitude * 0.6, wave_frequency * 1.3, secondary_phase, secondary_wave_dir);
+	
+	// Add noise for detail - use TIME for animation
+	float noise_height = texture(wave, world_pos.xz / noise_scale + TIME * wave_speed).r;
+	wave_offset.y += noise_height * height_scale * 0.3;
+	
+	// Apply wave displacement
+	VERTEX += wave_offset;
+	height = wave_offset.y;
 }
 
 void fragment() {
@@ -67,7 +109,12 @@ void fragment() {
 	vec2 time = (TIME * wave_direction) * time_scale;
 	vec2 time2 = (TIME * wave_2_direction) * time_scale;
 
+	// Enhanced normal calculation for surfable waves
 	vec3 normal_blend = mix(texture(texture_normal, world_pos.xz / noise_scale + time).rgb, texture(texture_normal2, world_pos.xz / noise_scale + time2).rgb, 0.5);
+	
+	// Add wave-based normal enhancement
+	float wave_normal_strength = 1.0 + sin(world_pos.x * 0.1 + TIME * 2.0) * 0.3;
+	normal_blend *= wave_normal_strength;
 
 	float fresnel = fresnel(5.0, NORMAL, VIEW);
 	vec3 surface_color = mix(albedo, albedo2, fresnel);
